@@ -292,6 +292,7 @@ impl Player {
 enum Blocks {
     Air,
     Dirt,
+    Grass,
 }
 
 struct Chunk {
@@ -320,6 +321,10 @@ impl Chunk {
                     Blocks::Dirt => {
                         //square with outlines
                         draw_rectangle(block_x, block_y, game.block_size, game.block_size, BROWN);
+                        //draw_rectangle_lines(block_x, block_y, game.block_size, game.block_size, 1.0, WHITE);
+                    },
+                    Blocks::Grass => {
+                        draw_rectangle(block_x, block_y, game.block_size, game.block_size, GREEN);
                         //draw_rectangle_lines(block_x, block_y, game.block_size, game.block_size, 1.0, WHITE);
                     },
                 }
@@ -415,8 +420,12 @@ fn generate_chunks() -> Vec<Vec<Chunk>> {
                     let global_y = (j * 16 + y) as f64;
                     
                     // If the current block's Y is below the calculated limit, it's ground
-                    if global_y > limit {
+                    if global_y > limit + 1.0 {
                         blocks[x][y] = Blocks::Dirt;
+                    }
+                    else if global_y > limit {
+                        // Add some randomness for a more natural look
+                        blocks[x][y] = Blocks::Grass;
                     }
                 }
             }
@@ -485,7 +494,7 @@ fn handle_frame_count(frame_count: usize, game: &mut Game) {
 }
 
 fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &Game) {
-    if is_mouse_button_down(MouseButton::Left) {
+    if is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right) {
         //get mouse position in world coordinates
         let mouse_x = mouse_position().0 + player.x - game.screen_width / 2.0;
         let mouse_y = mouse_position().1 + player.y - game.screen_height / 2.0;
@@ -502,9 +511,17 @@ fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &
         let local_x = (block_x % 16).abs() as usize;
         let local_y = (block_y % 16).abs() as usize;
 
-        if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
-            chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Air;
+        if is_mouse_button_down(MouseButton::Left) {
+            if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
+                chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Air;
+            }
         }
+        else if is_mouse_button_down(MouseButton::Right) {
+            if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
+                chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Dirt;
+            }
+        }
+        
     }
 }
 
