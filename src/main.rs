@@ -16,6 +16,38 @@ struct text {
     color: Color,
 }
 
+struct Item {
+    name: String,
+    item_id: usize,
+    quantity: usize,
+}
+
+impl Item {
+    fn new(name: String, item_id: usize, quantity: usize) -> Self {
+        Self {
+            name,
+            item_id,
+            quantity,
+        }
+    }
+}
+
+struct Inventory {
+    items: Vec<Item>,
+}
+
+impl Inventory {
+    fn new() -> Self {
+        let mut items = Vec::new();
+        for _i in 0..10 {
+            items.push(Item::new("".to_string(), 0, 0));
+        }
+        Self {
+            items,
+        }
+    }
+}
+
 struct Mob {
     x: f32, // Now in block units
     y: f32, // Now in block units
@@ -146,6 +178,7 @@ struct Player {
     size_y: f32,
     hitbox: Vec<Vec<f32>>,
     speed: f32,
+    inventory: Inventory,
 }
 
 impl Player {
@@ -173,6 +206,7 @@ impl Player {
             size_y: 2.0,
             hitbox: Vec::new(),
             speed: 0.01, // Scaled for block units
+            inventory: Inventory::new(),
         };
         p.calculate_hitbox(game);
         p
@@ -432,8 +466,24 @@ fn draw_fps_counter() {
     draw_text(&format!("FPS: {}", fps), 20.0, 32.0, 30.0, color);
 }
 
+fn draw_inventory(player: &Player) {
+    let inventory_width = 55.0 * 10.0 + 5.0;
+    let inventory_height = (inventory_width - 5.0) / 10.0 - 5.0 + 10.0;
+    let x = (screen_width() - inventory_width) / 2.0;
+    let y = screen_height() - inventory_height - 10.0;
+    draw_rectangle(x, y, inventory_width, inventory_height, Color::new(0.0, 0.0, 0.0, 0.5));
+    for (i, item) in player.inventory.items.iter().enumerate() {
+        let item_x = 5.0 + i as f32 * (inventory_width - 5.0) / 10.0 + x;
+        let item_y = y + 5.0;
+        draw_rectangle(item_x, item_y, (inventory_width - 5.0) / 10.0 - 5.0, inventory_height - 10.0, GRAY);
+        if item.quantity > 0 {
+            draw_text(&format!("{}", item.quantity), item_x + 4.0, item_y + 12.0, 12.0, WHITE);
+        }
+    }
+}
+
 fn handle_drawing(player: &Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
-    clear_background(BLACK);
+    clear_background(BLUE);
     for i in 0..chunks.len() {
         for j in 0..chunks[i].len() {
             chunks[i][j].draw(i, j, player, game);
@@ -441,6 +491,7 @@ fn handle_drawing(player: &Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
     }
     player.draw(&game);
     draw_fps_counter();
+    draw_inventory(player);
 }
 
 fn handle_frame_count(frame_count: usize, game: &mut Game) {
@@ -477,7 +528,7 @@ fn handle_resizing(game: &mut Game, player: &mut Player, mob: &mut Mob) {
     let (_, wheel_y) = mouse_wheel();
     if wheel_y != 0.0 {
         let mut new_block_size = game.block_size + wheel_y * 2.0;
-        new_block_size = new_block_size.clamp(16.0, 64.0);
+        new_block_size = new_block_size.clamp(1.0, 64.0);
         player.resize(new_block_size);
         mob.resize(new_block_size);
         game.block_size = new_block_size;
@@ -493,13 +544,22 @@ async fn main() {
     let mut player = Player::new(&game, &chunks);
     let mut mob = Mob::new(player.x + 5.0, player.y - 2.0, &game);
     let mut frame_count: usize = 0;
+    let mut mobs: Vec<Mob> = Vec::new();
+    let mob_count = 10;
+    for i in 0..mob_count {
+        mobs.push(Mob::new(player.x + 5.0 - i as f32 * 1.0, player.y - 2.0 - i as f32 * 1.0, &game));
+    }
 
     loop {
         handle_resizing(&mut game, &mut player, &mut mob);
-        mob.update(&player, &chunks, &game);
+        for i in 0..mob_count {
+            mobs[i].update(&player, &chunks, &game);
+        }
         handle_input(&mut player, &chunks, &game);
         handle_drawing(&player, &chunks, &game);
-        mob.draw(&player, &game);
+        for i in 0..mob_count {
+            mobs[i].draw(&player, &game);
+        }
         handle_frame_count(frame_count, &mut game);
         handle_mouse_input(&mut player, &mut chunks, &game);
         frame_count += 1;
