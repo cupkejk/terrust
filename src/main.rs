@@ -34,6 +34,7 @@ impl Item {
 
 struct Inventory {
     items: Vec<Item>,
+    active_slot: usize,
 }
 
 impl Inventory {
@@ -44,13 +45,35 @@ impl Inventory {
         }
         Self {
             items,
+            active_slot: 0,
         }
+    }
+
+    fn add_item(&mut self, item: Item) {
+        for inv_item in &mut self.items {
+            if inv_item.item_id == item.item_id && inv_item.item_id != 0 {
+                inv_item.quantity += item.quantity;
+                return;
+            }
+        }
+        for inv_item in &mut self.items {
+            if inv_item.item_id == 0 {
+                *inv_item = item;
+                return;
+            }
+        }
+    }
+
+    fn change_active_slot(&mut self, delta: isize) {
+        let delta = - delta;
+        let new_slot = (self.active_slot as isize + delta).rem_euclid(self.items.len() as isize) as usize;
+        self.active_slot = new_slot;
     }
 }
 
 struct Mob {
-    x: f32, // Now in block units
-    y: f32, // Now in block units
+    x: f32,
+    y: f32,
     velocity: Vec<f32>,
     isGrounded: bool,
     size_x: f32,
@@ -67,17 +90,15 @@ impl Mob {
             y,
             velocity: vec![0.0, 0.0],
             isGrounded: false,
-            size_x: 1.0, // 1 block wide
-            size_y: 1.0, // 1 block tall
+            size_x: 1.0,
+            size_y: 1.0,
             speed: 0.1,
             hitbox: Vec::new(),
             jump_cooldown: 0,
         }
     }
 
-    fn resize(&mut self, _new_block_size: f32) {
-        // Logic no longer depends on block_size
-    }
+    fn resize(&mut self, _new_block_size: f32) {}
 
     fn calculate_hitbox(&mut self, _game: &Game) {
         self.hitbox = vec![
@@ -120,14 +141,13 @@ impl Mob {
     }
 
     fn update(&mut self, player: &Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
-        self.velocity[1] += 0.01; // Gravity in block units
+        self.velocity[1] += 0.01;
         self.velocity[1] *= 0.99;
         
         if self.velocity[1] > 1.0 {
             self.velocity[1] = 1.0; 
         }
 
-        // Move X
         if !self.isGrounded {
             self.x += self.velocity[0];
             self.calculate_hitbox(game);
@@ -146,13 +166,12 @@ impl Mob {
             }
         }
 
-        // Move Y
         self.y += self.velocity[1];
         self.calculate_hitbox(game);
         if self.does_collide(chunks, game) {
             self.y -= self.velocity[1];
             if self.velocity[1] > 0.0 {
-                self.y = self.y.floor() + 0.99; // Snap to block grid
+                self.y = self.y.floor() + 0.99;
                 self.isGrounded = true;
             }
             self.velocity[1] = 0.0;
@@ -170,8 +189,8 @@ impl Mob {
 }
 
 struct Player {
-    x: f32, // Now in block units
-    y: f32, // Now in block units
+    x: f32,
+    y: f32,
     velocity: Vec<f32>,
     isGrounded: bool,
     size_x: f32,
@@ -205,7 +224,7 @@ impl Player {
             size_x: 1.0,
             size_y: 2.0,
             hitbox: Vec::new(),
-            speed: 0.01, // Scaled for block units
+            speed: 0.01,
             inventory: Inventory::new(),
         };
         p.calculate_hitbox(game);
@@ -215,7 +234,6 @@ impl Player {
     fn resize(&mut self, _new_block_size: f32) {}
 
     fn draw(&self, game: &Game) {
-        // Player is centered, but we render the model based on its size
         draw_rectangle(
             game.screen_width / 2.0, 
             game.screen_height / 2.0, 
@@ -231,7 +249,7 @@ impl Player {
     }
 
     fn update(&mut self, chunks: &Vec<Vec<Chunk>>, game: &Game) {
-        self.velocity[1] += 0.01; // Gravity in block units
+        self.velocity[1] += 0.01;
         self.velocity[0] *= 0.90; 
         self.velocity[1] *= 0.99;
         
@@ -239,7 +257,6 @@ impl Player {
             self.velocity[1] = 1.0; 
         }
 
-        // Move X
         self.x += self.velocity[0];
         self.calculate_hitbox(game);
         if self.does_collide(chunks, game) {
@@ -248,7 +265,6 @@ impl Player {
             self.calculate_hitbox(game);
         }
 
-        // Move Y
         self.y += self.velocity[1];
         self.calculate_hitbox(game);
         if self.does_collide(chunks, game) {
@@ -301,7 +317,6 @@ impl Player {
     }
 
     fn calculate_hitbox(&mut self, _game: &Game) {
-        // Hitbox defined in block units
         self.hitbox = vec![
             vec![self.x, self.y],
             vec![self.x + 0.5, self.y],
@@ -318,6 +333,17 @@ enum Blocks {
     Air,
     Dirt,
     Grass,
+}
+
+impl Blocks {
+    // Defines how long a block takes to break in seconds
+    fn hardness(&self) -> f32 {
+        match self {
+            Blocks::Air => 0.0,
+            Blocks::Dirt => 0.4,  // 0.4 seconds
+            Blocks::Grass => 0.6, // 0.6 seconds
+        }
+    }
 }
 
 struct Chunk {
@@ -352,10 +378,18 @@ impl Chunk {
     }
 }
 
+// Struct to store active block-breaking tracking metrics
+struct BreakingBlock {
+    pos: (i32, i32),
+    progress: f32, // Time tracking (in seconds)
+}
+
 struct Game {
     screen_width: f32,
     screen_height: f32,
     block_size: f32,
+    ctrl_pressed: bool,
+    breaking_block: Option<BreakingBlock>, // Active break instance tracking
 }
 
 impl Game {
@@ -364,6 +398,8 @@ impl Game {
             screen_width,
             screen_height,
             block_size,
+            ctrl_pressed: false,
+            breaking_block: None,
         }
     }
 }
@@ -447,7 +483,7 @@ fn window_conf() -> Conf {
     }
 }
 
-fn handle_input(player: &mut Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
+fn handle_input(player: &mut Player, chunks: &Vec<Vec<Chunk>>, game: &mut Game) {
     if is_key_pressed(KeyCode::Escape) {
         std::process::exit(0);
     }
@@ -456,6 +492,8 @@ fn handle_input(player: &mut Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
     if is_key_down(KeyCode::A) { player.movee(-1.0, 0.0, chunks, game); }
     if is_key_down(KeyCode::D) { player.movee(1.0, 0.0, chunks, game); }
     if is_key_down(KeyCode::Space) { player.jump(); }
+    if is_key_down(KeyCode::LeftControl) { game.ctrl_pressed = true; }
+    else { game.ctrl_pressed = false; }
     player.update(chunks, game);
 }
 
@@ -468,26 +506,72 @@ fn draw_fps_counter() {
 
 fn draw_inventory(player: &Player) {
     let inventory_width = 55.0 * 10.0 + 5.0;
-    let inventory_height = (inventory_width - 5.0) / 10.0 - 5.0 + 10.0;
+    let item_size = (inventory_width - 5.0) / 10.0 - 5.0;
+    let inventory_height = item_size + 10.0;
     let x = (screen_width() - inventory_width) / 2.0;
     let y = screen_height() - inventory_height - 10.0;
     draw_rectangle(x, y, inventory_width, inventory_height, Color::new(0.0, 0.0, 0.0, 0.5));
     for (i, item) in player.inventory.items.iter().enumerate() {
         let item_x = 5.0 + i as f32 * (inventory_width - 5.0) / 10.0 + x;
         let item_y = y + 5.0;
-        draw_rectangle(item_x, item_y, (inventory_width - 5.0) / 10.0 - 5.0, inventory_height - 10.0, GRAY);
+        if i == player.inventory.active_slot {
+            draw_rectangle(item_x, item_y, item_size, inventory_height - 10.0, YELLOW);
+        }
+        else {
+            draw_rectangle(item_x, item_y, item_size, inventory_height - 10.0, GRAY);
+        }
+        if item.item_id != 0 {
+            draw_text(&item.name, item_x + 4.0, item_y + 12.0, 12.0, WHITE);
+        }
         if item.quantity > 0 {
-            draw_text(&format!("{}", item.quantity), item_x + 4.0, item_y + 12.0, 12.0, WHITE);
+            draw_text(&format!("{}", item.quantity), item_x + 4.0, item_y + item_size - 5.0, 12.0, WHITE);
         }
     }
 }
 
-fn handle_drawing(player: &Player, chunks: &Vec<Vec<Chunk>>, game: &Game) {
+// Draws cracking effects onto the targeted block depending on breaking progress ratios
+fn draw_breaking_progress(player: &Player, game: &Game, chunks: &Vec<Vec<Chunk>>) {
+    if let Some(ref breaking) = game.breaking_block {
+        let (bx, by) = breaking.pos;
+        let chunk_x = bx / 16;
+        let chunk_y = by / 16;
+        let local_x = (bx % 16).abs() as usize;
+        let local_y = (by % 16).abs() as usize;
+
+        if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
+            let block = chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y];
+            if block != Blocks::Air {
+                let screen_x = (bx as f32 - player.x) * game.block_size + game.screen_width / 2.0;
+                let screen_y = (by as f32 - player.y) * game.block_size + game.screen_height / 2.0;
+                
+                let ratio = (breaking.progress / block.hardness()).clamp(0.0, 1.0);
+                
+                // Draws a black overlay layer that gets opaque as it nears completion
+                draw_rectangle(
+                    screen_x, 
+                    screen_y, 
+                    game.block_size, 
+                    game.block_size, 
+                    Color::new(0.0, 0.0, 0.0, ratio * 0.6)
+                );
+            }
+        }
+    }
+}
+
+fn handle_drawing(player: &Player, chunks: &Vec<Vec<Chunk>>, game: &Game, mobs: &Vec<Mob>) {
     clear_background(BLUE);
     for i in 0..chunks.len() {
         for j in 0..chunks[i].len() {
             chunks[i][j].draw(i, j, player, game);
         }
+    }
+    
+    // Render the visual overlay showing the block mining progress
+    draw_breaking_progress(player, game, chunks);
+
+    for i in 0..mobs.len() {
+        mobs[i].draw(&player, &game);
     }
     player.draw(&game);
     draw_fps_counter();
@@ -501,8 +585,12 @@ fn handle_frame_count(frame_count: usize, game: &mut Game) {
     }
 }
 
-fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &Game) {
-    if is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right) {
+fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &mut Game) {
+    // Check if player is holding the Pickaxe (item_id == 1)
+    let active_item = &player.inventory.items[player.inventory.active_slot];
+    let holding_pickaxe = active_item.item_id == 1;
+
+    if is_mouse_button_down(MouseButton::Left) && holding_pickaxe {
         let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
         let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
 
@@ -515,23 +603,68 @@ fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &
         let local_y = (block_y % 16).abs() as usize;
 
         if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
-            if is_mouse_button_down(MouseButton::Left) {
-                chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Air;
-            } else if is_mouse_button_down(MouseButton::Right) {
-                chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Dirt;
+            let target_block = chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y];
+
+            if target_block != Blocks::Air {
+                if let Some(ref mut current) = game.breaking_block {
+                    if current.pos == (block_x, block_y) {
+                        // Progress added via delta time across frames
+                        current.progress += get_frame_time();
+
+                        if current.progress >= target_block.hardness() {
+                            chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Air;
+                            game.breaking_block = None;
+                        }
+                    } else {
+                        // Mouse moved onto another block: Reset tracking
+                        game.breaking_block = Some(BreakingBlock {
+                            pos: (block_x, block_y),
+                            progress: 0.0,
+                        });
+                    }
+                } else {
+                    // Start breaking track state instance
+                    game.breaking_block = Some(BreakingBlock {
+                        pos: (block_x, block_y),
+                        progress: 0.0,
+                    });
+                }
+                return; // Early return prevents clearing track data below
             }
         }
     }
+    
+    if is_mouse_button_down(MouseButton::Right) {
+        let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
+        let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
+        let block_x = mouse_world_x.floor() as i32;
+        let block_y = mouse_world_y.floor() as i32;
+        let chunk_x = block_x / 16;
+        let chunk_y = block_y / 16;
+        let local_x = (block_x % 16).abs() as usize;
+        let local_y = (block_y % 16).abs() as usize;
+
+        if chunk_x >= 0 && chunk_y >= 0 && (chunk_x as usize) < chunks.len() && (chunk_y as usize) < chunks[chunk_x as usize].len() {
+            chunks[chunk_x as usize][chunk_y as usize].blocks[local_x][local_y] = Blocks::Dirt;
+        }
+        return;
+    }
+
+    // Left click was lifted, or pickaxe wasn't equipped: Reset progress!
+    game.breaking_block = None;
 }
 
 fn handle_resizing(game: &mut Game, player: &mut Player, mob: &mut Mob) {
     let (_, wheel_y) = mouse_wheel();
-    if wheel_y != 0.0 {
+    if wheel_y != 0.0 && game.ctrl_pressed {
         let mut new_block_size = game.block_size + wheel_y * 2.0;
         new_block_size = new_block_size.clamp(1.0, 64.0);
         player.resize(new_block_size);
         mob.resize(new_block_size);
         game.block_size = new_block_size;
+    }
+    else if wheel_y != 0.0 {
+        player.inventory.change_active_slot(wheel_y as isize);
     }
 }
 
@@ -542,6 +675,7 @@ async fn main() {
     let mut game = Game::new(width, height, 32.0);
     let mut chunks = generate_chunks();
     let mut player = Player::new(&game, &chunks);
+    player.inventory.add_item(Item::new("Pickaxe".to_string(), 1, 1));
     let mut mob = Mob::new(player.x + 5.0, player.y - 2.0, &game);
     let mut frame_count: usize = 0;
     let mut mobs: Vec<Mob> = Vec::new();
@@ -555,13 +689,10 @@ async fn main() {
         for i in 0..mob_count {
             mobs[i].update(&player, &chunks, &game);
         }
-        handle_input(&mut player, &chunks, &game);
-        handle_drawing(&player, &chunks, &game);
-        for i in 0..mob_count {
-            mobs[i].draw(&player, &game);
-        }
+        handle_input(&mut player, &chunks, &mut game);
+        handle_drawing(&player, &chunks, &game, &mobs);
         handle_frame_count(frame_count, &mut game);
-        handle_mouse_input(&mut player, &mut chunks, &game);
+        handle_mouse_input(&mut player, &mut chunks, &mut game);
         frame_count += 1;
 
         next_frame().await;
