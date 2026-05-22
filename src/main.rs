@@ -81,6 +81,8 @@ struct Mob {
     speed: f32,
     hitbox: Vec<Vec<f32>>,
     jump_cooldown: usize,
+    health: i32,
+    isAlive: bool,
 }
 
 impl Mob {
@@ -95,6 +97,8 @@ impl Mob {
             speed: 0.1,
             hitbox: Vec::new(),
             jump_cooldown: 0,
+            health: 10,
+            isAlive: true,
         }
     }
 
@@ -185,6 +189,16 @@ impl Mob {
         let screen_x = (self.x - player.x) * game.block_size + game.screen_width / 2.0;
         let screen_y = (self.y - player.y) * game.block_size + game.screen_height / 2.0;
         draw_rectangle(screen_x, screen_y, self.size_x * game.block_size, self.size_y * game.block_size, GREEN);
+        //draw health bar
+        let health_ratio = self.health as f32 / 10.0;
+        draw_rectangle(screen_x, screen_y - 5.0, self.size_x * game.block_size * health_ratio, 3.0, RED);
+    }
+
+    fn take_damage(&mut self, amount: i32) {
+        self.health -= amount;
+        if self.health <= 0 {
+            self.isAlive = false;
+        }
     }
 }
 
@@ -585,10 +599,18 @@ fn handle_frame_count(frame_count: usize, game: &mut Game) {
     }
 }
 
-fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &mut Game) {
+fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &mut Game, mobs: &mut Vec<Mob>) {
     // Check if player is holding the Pickaxe (item_id == 1)
     let active_item = &player.inventory.items[player.inventory.active_slot];
     let holding_pickaxe = active_item.item_id == 1;
+    let holding_sword = active_item.item_id == 2;
+    //calculate if the mouse if not too far from the player (within 5 blocks)
+    let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
+    let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
+    let distance = ((mouse_world_x - player.x).powi(2) + (mouse_world_y - player.y).powi(2)).sqrt();
+    if distance > 3.0 {
+        return; // Too far to interact
+    }
 
     if is_mouse_button_down(MouseButton::Left) && holding_pickaxe {
         let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
@@ -630,6 +652,20 @@ fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &
                     });
                 }
                 return; // Early return prevents clearing track data below
+            }
+        }
+    }
+    else if is_mouse_button_pressed(MouseButton::Left) && holding_sword {
+        //mob hurting logic here
+        //&mut mobs in not an iterator!!
+        println!("HURT!!!");
+        for mob in &mut mobs.iter_mut() {
+            let mob_screen_x = (mob.x - player.x) * game.block_size + game.screen_width / 2.0;
+            let mob_screen_y = (mob.y - player.y) * game.block_size + game.screen_height / 2.0;
+            let (mouse_x, mouse_y) = mouse_position();
+            if mouse_x >= mob_screen_x && mouse_x <= mob_screen_x + mob.size_x * game.block_size &&
+                mouse_y >= mob_screen_y && mouse_y <= mob_screen_y + mob.size_y * game.block_size {
+                mob.take_damage(3);
             }
         }
     }
@@ -675,24 +711,32 @@ async fn main() {
     let mut game = Game::new(width, height, 32.0);
     let mut chunks = generate_chunks();
     let mut player = Player::new(&game, &chunks);
+    player.inventory.add_item(Item::new("Sword".to_string(), 2, 1));
     player.inventory.add_item(Item::new("Pickaxe".to_string(), 1, 1));
+    player.inventory.add_item(Item::new("Axe".to_string(), 3, 1));
     let mut mob = Mob::new(player.x + 5.0, player.y - 2.0, &game);
     let mut frame_count: usize = 0;
     let mut mobs: Vec<Mob> = Vec::new();
     let mob_count = 10;
     for i in 0..mob_count {
-        mobs.push(Mob::new(player.x + 5.0 - i as f32 * 1.0, player.y - 2.0 - i as f32 * 1.0, &game));
+        mobs.push(Mob::new(player.x + 5.0 - i as f32 * 5.0, player.y - 2.0 - i as f32 * 5.0, &game));
     }
 
     loop {
         handle_resizing(&mut game, &mut player, &mut mob);
-        for i in 0..mob_count {
+        for i in 0..mobs.len() {
             mobs[i].update(&player, &chunks, &game);
+        }
+        // In your update loop:
+        for i in (0..mobs.len()).rev() {
+            if !mobs[i].isAlive {
+                mobs.swap_remove(i);
+            }
         }
         handle_input(&mut player, &chunks, &mut game);
         handle_drawing(&player, &chunks, &game, &mobs);
         handle_frame_count(frame_count, &mut game);
-        handle_mouse_input(&mut player, &mut chunks, &mut game);
+        handle_mouse_input(&mut player, &mut chunks, &mut game, &mut mobs);
         frame_count += 1;
 
         next_frame().await;
