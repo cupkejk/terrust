@@ -212,6 +212,7 @@ struct Player {
     hitbox: Vec<Vec<f32>>,
     speed: f32,
     inventory: Inventory,
+    slash: Option<Slash>,
 }
 
 impl Player {
@@ -240,6 +241,7 @@ impl Player {
             hitbox: Vec::new(),
             speed: 0.01,
             inventory: Inventory::new(),
+            slash: None,
         };
         p.calculate_hitbox(game);
         p
@@ -255,6 +257,31 @@ impl Player {
             game.block_size * 1.5, 
             RED
         );
+
+        if let Some(ref slash) = self.slash {
+            let screen_x = game.screen_width / 2.0 + (self.size_x * game.block_size) / 2.0;
+            let screen_y = game.screen_height / 2.0 + (self.size_y * game.block_size) / 2.0;
+            let pixel_radius = slash.radius * game.block_size;
+
+            // Convert center angle to degrees 
+            let center_angle_deg = slash.angle.to_degrees();
+            
+            // Macroquad's draw_arc starts drawing from `rotation` 
+            // and sweeps clockwise by `arc` degrees.
+            let start_angle = center_angle_deg - 45.0; 
+            let sweep_angle = 90.0; 
+
+            draw_arc(
+                screen_x,
+                screen_y,
+                50,            // sides (segment count for smoothness)
+                pixel_radius,
+                start_angle,   // rotation
+                5.0,           // thickness
+                sweep_angle,   // arc length
+                WHITE,
+            );
+        }
     }
 
     fn movee(&mut self, dx: f32, dy: f32, _chunks: &Vec<Vec<Chunk>>, _game: &Game) {
@@ -396,6 +423,11 @@ impl Chunk {
 struct BreakingBlock {
     pos: (i32, i32),
     progress: f32, // Time tracking (in seconds)
+}
+
+struct Slash {
+    angle: f32,
+    radius: f32,
 }
 
 struct Game {
@@ -608,11 +640,11 @@ fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &
     let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
     let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
     let distance = ((mouse_world_x - player.x).powi(2) + (mouse_world_y - player.y).powi(2)).sqrt();
-    if distance > 3.0 {
-        return; // Too far to interact
-    }
 
     if is_mouse_button_down(MouseButton::Left) && holding_pickaxe {
+        if distance > 3.0 {
+            return; // Too far to interact
+        }
         let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
         let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
 
@@ -656,15 +688,60 @@ fn handle_mouse_input(player: &mut Player, chunks: &mut Vec<Vec<Chunk>>, game: &
         }
     }
     else if is_mouse_button_pressed(MouseButton::Left) && holding_sword {
-        //mob hurting logic here
-        //&mut mobs in not an iterator!!
-        println!("HURT!!!");
-        for mob in &mut mobs.iter_mut() {
-            let mob_screen_x = (mob.x - player.x) * game.block_size + game.screen_width / 2.0;
-            let mob_screen_y = (mob.y - player.y) * game.block_size + game.screen_height / 2.0;
-            let (mouse_x, mouse_y) = mouse_position();
-            if mouse_x >= mob_screen_x && mouse_x <= mob_screen_x + mob.size_x * game.block_size &&
-                mouse_y >= mob_screen_y && mouse_y <= mob_screen_y + mob.size_y * game.block_size {
+        // 1. Calculate world positions
+        let mouse_world_x = (mouse_position().0 - game.screen_width / 2.0) / game.block_size + player.x;
+        let mouse_world_y = (mouse_position().1 - game.screen_height / 2.0) / game.block_size + player.y;
+        
+        // Find center of player for the origin of the swing
+        let player_center_x = player.x + player.size_x / 2.0;
+        let player_center_y = player.y + player.size_y / 2.0;
+
+        // 2. Calculate direction angle of the swing
+        let dx = mouse_world_x - player_center_x;
+        let dy = mouse_world_y - player_center_y;
+        let swing_angle = dy.atan2(dx); 
+        let slash_radius = 2.5; // Hits mobs within 2.5 blocks distance
+
+        // Register the slash for drawing this frame
+        player.slash = Some(Slash {
+            angle: swing_angle,
+            radius: slash_radius,
+        });
+
+        // 3. Area of Effect (AOE) Damage calculation
+        for mob in mobs.iter_mut() {
+            // First, ensure the mob's hitbox points are up to date
+            mob.calculate_hitbox(game);
+
+            let mut hit_registered = false;
+
+            for point in &mob.hitbox {
+                let point_x = point[0];
+                let point_y = point[1];
+
+                let mob_dx = point_x - player_center_x;
+                let mob_dy = point_y - player_center_y;
+                let distance = (mob_dx.powi(2) + mob_dy.powi(2)).sqrt();
+
+                // Check distance of this specific corner point
+                if distance <= slash_radius {
+                    let mob_angle = mob_dy.atan2(mob_dx);
+                    
+                    // Calculate shortest angular difference
+                    let mut angle_diff = (mob_angle - swing_angle).to_degrees().abs();
+                    if angle_diff > 180.0 {
+                        angle_diff = 360.0 - angle_diff;
+                    }
+
+                    // Check if this point falls inside the 90-degree wedge
+                    if angle_diff <= 45.0 {
+                        hit_registered = true;
+                        break; // Stop checking this mob's other points; it's a hit!
+                    }
+                }
+            }
+
+            if hit_registered {
                 mob.take_damage(3);
             }
         }
@@ -735,6 +812,7 @@ async fn main() {
         }
         handle_input(&mut player, &chunks, &mut game);
         handle_drawing(&player, &chunks, &game, &mobs);
+        player.slash = None; // Reset slash after drawing for one frame
         handle_frame_count(frame_count, &mut game);
         handle_mouse_input(&mut player, &mut chunks, &mut game, &mut mobs);
         frame_count += 1;
